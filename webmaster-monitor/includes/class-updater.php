@@ -20,7 +20,7 @@ class WM_Monitor_Updater {
     /**
      * URL dell'API per il check aggiornamenti
      */
-    private $api_url = 'https://app.webmaster-monitor.com/api/plugin/info';
+    private $api_url = 'https://webmaster-ruby.vercel.app/api/plugin/info';
 
     /**
      * Slug del plugin
