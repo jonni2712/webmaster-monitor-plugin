@@ -3,7 +3,7 @@
  * Plugin Name: Webmaster Monitor
  * Plugin URI: https://webmaster-monitor.com
  * Description: Collega il tuo sito WordPress alla piattaforma Webmaster Monitor per monitoraggio server, aggiornamenti e sicurezza.
- * Version: 1.0.1
+ * Version: 1.0.2
  * Author: Webmaster Monitor
  * Author URI: https://webmaster-monitor.com
  * License: GPL v2 or later
@@ -20,7 +20,7 @@ if (!defined('ABSPATH')) {
 }
 
 // Costanti plugin
-define('WM_MONITOR_VERSION', '1.0.1');
+define('WM_MONITOR_VERSION', '1.0.2');
 define('WM_MONITOR_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('WM_MONITOR_PLUGIN_URL', plugin_dir_url(__FILE__));
 define('WM_MONITOR_PLUGIN_BASENAME', plugin_basename(__FILE__));
@@ -59,6 +59,7 @@ class Webmaster_Monitor {
     private function load_dependencies() {
         require_once WM_MONITOR_PLUGIN_DIR . 'includes/class-server-info.php';
         require_once WM_MONITOR_PLUGIN_DIR . 'includes/class-wp-info.php';
+        require_once WM_MONITOR_PLUGIN_DIR . 'includes/class-multisite-info.php';
         require_once WM_MONITOR_PLUGIN_DIR . 'includes/class-api.php';
         require_once WM_MONITOR_PLUGIN_DIR . 'includes/class-updater.php';
         require_once WM_MONITOR_PLUGIN_DIR . 'admin/settings.php';

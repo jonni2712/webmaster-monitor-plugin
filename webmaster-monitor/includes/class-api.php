@@ -52,6 +52,24 @@ class WM_Monitor_API {
             'callback' => array(__CLASS__, 'ping'),
             'permission_callback' => array(__CLASS__, 'verify_api_key'),
         ));
+
+        // Endpoint: applica aggiornamento
+        register_rest_route(self::API_NAMESPACE, '/apply-update', array(
+            'methods' => 'POST',
+            'callback' => array(__CLASS__, 'apply_update'),
+            'permission_callback' => array(__CLASS__, 'verify_api_key'),
+            'args' => array(
+                'type' => array(
+                    'required' => true,
+                    'type' => 'string',
+                    'enum' => array('plugin', 'theme', 'core'),
+                ),
+                'slug' => array(
+                    'required' => true,
+                    'type' => 'string',
+                ),
+            ),
+        ));
     }
 
     /**
@@ -93,6 +111,7 @@ class WM_Monitor_API {
             'timestamp' => current_time('c'),
             'server' => WM_Monitor_Server_Info::get_all(),
             'wordpress' => WM_Monitor_WP_Info::get_all(),
+            'multisite' => WM_Monitor_Multisite_Info::get_all(),
         );
 
         return new WP_REST_Response($data, 200);
@@ -165,5 +184,180 @@ class WM_Monitor_API {
             'timestamp' => current_time('c'),
             'site_url' => get_site_url(),
         ), 200);
+    }
+
+    /**
+     * Endpoint: Applica aggiornamento
+     */
+    public static function apply_update($request) {
+        $type = $request->get_param('type');
+        $slug = $request->get_param('slug');
+
+        // Include required WordPress upgrade files
+        require_once ABSPATH . 'wp-admin/includes/class-wp-upgrader.php';
+        require_once ABSPATH . 'wp-admin/includes/file.php';
+        require_once ABSPATH . 'wp-admin/includes/plugin.php';
+        require_once ABSPATH . 'wp-admin/includes/theme.php';
+        require_once ABSPATH . 'wp-admin/includes/misc.php';
+        require_once ABSPATH . 'wp-admin/includes/update.php';
+
+        // Silent skin - no output
+        $skin = new WP_Ajax_Upgrader_Skin();
+
+        try {
+            switch ($type) {
+                case 'plugin':
+                    $result = self::update_plugin($slug, $skin);
+                    break;
+                case 'theme':
+                    $result = self::update_theme($slug, $skin);
+                    break;
+                case 'core':
+                    $result = self::update_core($skin);
+                    break;
+                default:
+                    return new WP_Error(
+                        'invalid_type',
+                        __('Tipo di aggiornamento non valido', 'webmaster-monitor'),
+                        array('status' => 400)
+                    );
+            }
+
+            if (is_wp_error($result)) {
+                return new WP_REST_Response(array(
+                    'success' => false,
+                    'error' => $result->get_error_message(),
+                    'type' => $type,
+                    'slug' => $slug,
+                ), 500);
+            }
+
+            return new WP_REST_Response(array(
+                'success' => true,
+                'message' => sprintf(__('%s aggiornato con successo', 'webmaster-monitor'), ucfirst($type)),
+                'type' => $type,
+                'slug' => $slug,
+                'new_version' => $result['new_version'] ?? null,
+            ), 200);
+
+        } catch (Exception $e) {
+            return new WP_REST_Response(array(
+                'success' => false,
+                'error' => $e->getMessage(),
+                'type' => $type,
+                'slug' => $slug,
+            ), 500);
+        }
+    }
+
+    /**
+     * Aggiorna un plugin
+     */
+    private static function update_plugin($slug, $skin) {
+        // Force refresh of update transient
+        wp_update_plugins();
+
+        $update_plugins = get_site_transient('update_plugins');
+
+        // Find plugin file from slug
+        $plugin_file = null;
+        if (!empty($update_plugins->response)) {
+            foreach ($update_plugins->response as $file => $plugin_data) {
+                if (dirname($file) === $slug || $file === $slug) {
+                    $plugin_file = $file;
+                    break;
+                }
+            }
+        }
+
+        if (!$plugin_file) {
+            return new WP_Error('no_update', __('Nessun aggiornamento disponibile per questo plugin', 'webmaster-monitor'));
+        }
+
+        $upgrader = new Plugin_Upgrader($skin);
+        $result = $upgrader->upgrade($plugin_file);
+
+        if (is_wp_error($result)) {
+            return $result;
+        }
+
+        if ($result === false) {
+            return new WP_Error('upgrade_failed', __('Aggiornamento plugin fallito', 'webmaster-monitor'));
+        }
+
+        // Get new version
+        $plugin_data = get_plugin_data(WP_PLUGIN_DIR . '/' . $plugin_file);
+
+        return array(
+            'success' => true,
+            'new_version' => $plugin_data['Version'] ?? null,
+        );
+    }
+
+    /**
+     * Aggiorna un tema
+     */
+    private static function update_theme($slug, $skin) {
+        // Force refresh of update transient
+        wp_update_themes();
+
+        $update_themes = get_site_transient('update_themes');
+
+        if (empty($update_themes->response[$slug])) {
+            return new WP_Error('no_update', __('Nessun aggiornamento disponibile per questo tema', 'webmaster-monitor'));
+        }
+
+        $upgrader = new Theme_Upgrader($skin);
+        $result = $upgrader->upgrade($slug);
+
+        if (is_wp_error($result)) {
+            return $result;
+        }
+
+        if ($result === false) {
+            return new WP_Error('upgrade_failed', __('Aggiornamento tema fallito', 'webmaster-monitor'));
+        }
+
+        // Get new version
+        $theme = wp_get_theme($slug);
+
+        return array(
+            'success' => true,
+            'new_version' => $theme->get('Version'),
+        );
+    }
+
+    /**
+     * Aggiorna WordPress core
+     */
+    private static function update_core($skin) {
+        // Force refresh of update transient
+        wp_version_check();
+
+        $updates = get_core_updates();
+
+        if (empty($updates) || $updates[0]->response === 'latest') {
+            return new WP_Error('no_update', __('WordPress e\' gia\' aggiornato all\'ultima versione', 'webmaster-monitor'));
+        }
+
+        $update = $updates[0];
+
+        $upgrader = new Core_Upgrader($skin);
+        $result = $upgrader->upgrade($update);
+
+        if (is_wp_error($result)) {
+            return $result;
+        }
+
+        if ($result === false) {
+            return new WP_Error('upgrade_failed', __('Aggiornamento WordPress fallito', 'webmaster-monitor'));
+        }
+
+        global $wp_version;
+
+        return array(
+            'success' => true,
+            'new_version' => $wp_version,
+        );
     }
 }
